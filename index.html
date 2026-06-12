@@ -1907,9 +1907,9 @@ function startWorkout(progIdx){
   switchPage("timer",document.getElementById("navTimer"));
   // Short countdown voice before first exercise
   playBell(); // cloche de départ
-  speak("C'est parti Paul ! Bonne séance !", 0.9, 1.1, 600);
-  // Lancer la voix de fond après 5s
-  setTimeout(()=>loadStep(0), 1800);
+  speak("C'est parti Paul ! Bonne séance !", 0.88, 1.05, 500);
+  // Attendre que la phrase soit terminée avant de lancer le premier exercice
+  setTimeout(()=>loadStep(0), 4500);
 }
 
 function loadStep(idx){
