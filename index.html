@@ -543,7 +543,7 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
       </select>
     </div>
     <div class="fg">
-      <label>Signal sonore de fin</label>
+      <label>Signal sonore de fin (silence ou bip)</label>
       <input type="hidden" id="exBip" value="triple" />
       <div class="bip-grid" id="bipGrid"></div>
     </div>
@@ -1272,38 +1272,49 @@ function playBeep(freq=880, dur=0.15, vol=0.5, delay=0, type="sine"){
   }catch(e){ console.warn("playBeep error:", e); }
 }
 
-// ── TYPES DE BIPS ──
+// ── SONS FIXES (non configurables) ──
+// BIP COMPTE À REBOURS : court, net, ton montant 3→2→1
+function playCountdownBip(sec){
+  // sec=3 → grave, sec=2 → medium, sec=1 → aigu et plus fort
+  const freqs={3:660, 2:880, 1:1100};
+  const vols={3:0.4, 2:0.5, 1:0.7};
+  const freq=freqs[sec]||880;
+  const vol=vols[sec]||0.5;
+  playBeep(freq, 0.08, vol, 0, "sine");
+}
+
+// CLOCHE changement d'exercice : son "ding" clair
+function playBell(){
+  // Fondamentale + harmonique → son de cloche
+  playBeep(1046, 0.05, 0.6, 0,    "sine"); // attaque
+  playBeep(1046, 0.5,  0.5, 0.01, "sine"); // sustain
+  playBeep(2093, 0.1,  0.2, 0.01, "sine"); // harmonique 2x
+  playBeep(3136, 0.06, 0.1, 0.01, "sine"); // harmonique 3x
+}
+
+// TRIPLE CLOCHE fin de set
+function playTripleBell(){
+  [0, 0.25, 0.5].forEach(d=>{
+    playBeep(1046, 0.04, 0.5, d,      "sine");
+    playBeep(1046, 0.3,  0.4, d+0.01, "sine");
+    playBeep(2093, 0.08, 0.2, d+0.01, "sine");
+  });
+}
+
+// BIP_TYPES réduit à 2 : silence ou bip unique (pour le sélecteur d'exercice)
 const BIP_TYPES = [
-  { id:"none",     label:"Silence",      icon:"🔇", play:()=>{} },
-  { id:"single",   label:"Bip simple",   icon:"🔔", play:()=>{ playBeep(880,0.18,0.5,0,"sine"); } },
-  { id:"double",   label:"Double bip",   icon:"🔔🔔", play:()=>{ playBeep(880,0.12,0.5,0); playBeep(880,0.12,0.5,0.2); } },
-  { id:"triple",   label:"Triple bip ✅", icon:"✅", play:()=>{ playBeep(880,0.15,0.5,0); playBeep(880,0.15,0.5,0.22); playBeep(660,0.25,0.6,0.44); } },
-  { id:"ascend",   label:"Montée 📈",    icon:"📈", play:()=>{ playBeep(550,0.15,0.5,0); playBeep(770,0.15,0.5,0.2); playBeep(990,0.2,0.6,0.4); } },
-  { id:"descend",  label:"Descente",     icon:"📉", play:()=>{ playBeep(990,0.15,0.5,0); playBeep(770,0.15,0.5,0.2); playBeep(440,0.25,0.6,0.4); } },
-  { id:"whistle",  label:"Sifflet",      icon:"🎵", play:()=>{ playBeep(1800,0.06,0.4,0,"sine"); playBeep(1600,0.08,0.4,0.08,"sine"); playBeep(1900,0.12,0.5,0.18,"sine"); } },
-  { id:"horn",     label:"Klaxon",       icon:"📣", play:()=>{ playBeep(220,0.3,0.5,0,"sawtooth"); playBeep(180,0.3,0.4,0.12,"sawtooth"); } },
-  { id:"chime",    label:"Carillon",     icon:"🎼", play:()=>{ [523,659,784,1047].forEach((f,i)=>playBeep(f,0.2,0.4,i*0.12,"sine")); } },
-  { id:"start",    label:"Départ 🚀",    icon:"🚀", play:()=>{ playBeep(660,0.15,0.4,0); playBeep(880,0.2,0.5,0.18); } },
-  { id:"box",      label:"Boxe 🥊",      icon:"🥊", play:()=>{ playBeep(300,0.05,0.6,0,"square"); playBeep(250,0.08,0.5,0.06,"square"); playBeep(200,0.15,0.4,0.15,"sawtooth"); } },
-  { id:"deep",     label:"Grave",        icon:"💥", play:()=>{ playBeep(80,0.4,0.6,0,"sawtooth"); playBeep(60,0.3,0.4,0.1,"sine"); } },
-  { id:"beepbeep", label:"Deux fois",    icon:"⏱️", play:()=>{ playBeep(1000,0.08,0.5,0); playBeep(1000,0.08,0.5,0.15); playBeep(1200,0.2,0.6,0.4); } },
-  { id:"laser",    label:"Laser",        icon:"⚡", play:()=>{ for(let i=0;i<8;i++) playBeep(1500-i*80,0.04,0.3,i*0.04,"sine"); } },
-  { id:"coin",     label:"Coin 🏅",      icon:"🏅", play:()=>{ playBeep(988,0.08,0.4,0,"sine"); playBeep(1319,0.12,0.5,0.1,"sine"); playBeep(1568,0.3,0.6,0.22,"sine"); } },
-  { id:"bell",     label:"Cloche 🔕",    icon:"🔕", play:()=>{ playBeep(830,0.06,0.5,0,"sine"); playBeep(1046,0.25,0.6,0.06,"sine"); playBeep(830,0.08,0.2,0.35,"sine"); } },
-  { id:"triple_bell", label:"3x Cloche 🔔🔔🔔", icon:"🔔🔔🔔", play:()=>{ [0,0.18,0.36].forEach(d=>{ playBeep(830,0.05,0.5,d,"sine"); playBeep(1046,0.18,0.6,d+0.05,"sine"); }); } },
-  { id:"end_fanfare", label:"Fanfare fin 🎺", icon:"🎺", play:()=>{ playBeep(523,0.12,0.5,0); playBeep(659,0.12,0.5,0.15); playBeep(784,0.12,0.5,0.3); playBeep(1047,0.4,0.7,0.5); } },
+  { id:"none", label:"Silence", icon:"🔇", play:()=>{} },
+  { id:"bip",  label:"Bip",     icon:"🔔", play:()=>{ playBeep(880,0.08,0.6,0,"sine"); } },
 ];
 
 function playBipById(id){
-  const b=BIP_TYPES.find(b=>b.id===id)||BIP_TYPES[3];
+  const b=BIP_TYPES.find(b=>b.id===id)||BIP_TYPES[1];
   b.play();
 }
-
-// BIP SERIES (toujours double aigu)
-function playSetBeep(){ playBeep(1100,0.1,0.4,0); playBeep(1100,0.1,0.4,0.15); }
-// Alias pour fin d'exercice → utilise le bip configuré sur l'exercice
-function playTripleBeep(){ BIP_TYPES[3].play(); } // fallback triple
-function playStartBeep(){ playBeep(660,0.15,0.4,0); playBeep(880,0.2,0.5,0.18); }
+// Aliases pour compatibilité
+function playTripleBeep(){ playTripleBell(); }
+function playSetBeep(){ playTripleBell(); }
+function playStartBeep(){ playBell(); }
 
 // ── SÉLECTEUR DE BIP dans la modale ──
 let _selBip="triple";
@@ -1478,7 +1489,8 @@ function speak(text, rate, pitch, delay){
 function speakName(text){ speak(text); }
 
 function announceExercise(name){
-  speak(name, 0.9, 1.05, 350);
+  playBell();                          // cloche 1 sec avant la voix
+  speak(name, 0.9, 1.05, 600);        // voix après la cloche
 }
 
 // Annonce pause : "Pause X secondes" + phrase de récup
@@ -1489,15 +1501,14 @@ function announcePause(secs){
 
 // Annonce changement de série
 function announceSeriesBreak(label){
-  playBipById("triple_bell");
+  playTripleBell();
 }
 
 // Comptage à rebours sur les 3 dernières secondes
 let _countdownSpoken = false;
 function maybeCountdown(rem, tot){
-  if(rem<=3 && rem>0){
-    const freq=[700,800,900][rem-1];
-    playBeep(freq, 0.15, 0.6, 0, "sine");
+  if(rem>=1 && rem<=3){
+    playCountdownBip(rem); // 3→grave, 2→medium, 1→aigu
   }
 }
 
@@ -1912,8 +1923,7 @@ function loadStep(idx){
     announcePause(s.time||15);
   } else if(s.name){
     // Cloche de transition + annonce du nom
-    playBipById("bell");
-    setTimeout(()=>speak(s.name, 0.9, 1.05, 0), 400);
+    announceExercise(s.name);
   }
 
   // Auto-start : démarre le chrono automatiquement sauf si manuel ou type reps
@@ -1999,7 +2009,8 @@ function renderUpcoming(){
 function finishWorkout(){
   clearInterval(TM.iv);
   playTripleBeep();
-  speak("Séance terminée ! Bravo Paul, tu es un champion ! Tu es un vrai Canadien !", 0.88, 1.1, 200);
+  playBell();
+  speak("Séance terminée ! Bravo Paul !", 0.88, 1.1, 800);
   const xpG=50+TM.steps.filter(s=>!s._seriesBreak).length*5;
   const prevIdx=getLvlIdx();
   S.xp+=xpG;
