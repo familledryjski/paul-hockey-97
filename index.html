@@ -501,17 +501,17 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
     <div class="fg-row2" id="exRepsRow">
       <div class="fg" style="margin:0;">
         <label id="exRepsLbl">Répétitions</label>
-        <input type="number" id="exReps" value="8" min="1" />
+        <input type="text" inputmode="numeric" id="exReps" value="8" />
       </div>
       <div class="fg" style="margin:0;">
         <label>Séries</label>
-        <input type="number" id="exSeries" value="1" min="1" />
+        <input type="text" inputmode="numeric" id="exSeries" value="1" />
       </div>
     </div>
     <div class="fg" id="exTimeRow">
       <label id="exTimeLbl">Durée</label>
       <div style="display:flex;gap:8px;align-items:center;">
-        <input type="number" id="exTime" value="45" min="1" style="flex:1;" oninput="updateTimeLive()" />
+        <input type="text" inputmode="decimal" id="exTime" value="45" style="flex:1;" oninput="updateTimeLive()" />
         <select id="exTimeUnit" style="width:110px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 8px;color:var(--text);font-size:13px;" onchange="updateTimeLive()">
           <option value="s">Secondes</option>
           <option value="m">Minutes</option>
@@ -553,7 +553,7 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
     </div>
     <div class="modal-actions">
       <button class="btn-sec" onclick="closeOv('ovEx')">Annuler</button>
-      <button class="btn-primary" onclick="saveEx()">Enregistrer</button>
+      <button class="btn-primary" type="button" onclick="saveEx()">Enregistrer</button>
     </div>
   </div>
 </div>
@@ -783,7 +783,7 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
   <div id="pinLock">
     <div class="pin-lock">
       <div style="font-size:42px;">🔒</div>
-      <div style="font-size:17px;font-weight:800;">Accès parent</div>
+      <div style="font-size:17px;font-weight:800;">Accès entraineur</div>
       <div style="font-size:13px;color:var(--text2);">Entre le code PIN pour accéder à la zone entraîneur</div>
       <input type="password" class="pin-input" id="pinInput" maxlength="4" placeholder="••••" oninput="if(this.value.length===4)checkPin()" />
       <div style="font-size:11px;color:var(--text3);">Code par défaut : 1234</div>
@@ -809,7 +809,7 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
     <!-- Sélecteur de mode : récurrent ou date spécifique -->
     <div style="padding:14px 20px 10px;">
       <div class="ed-mode-row">
-        <button class="ed-mode-btn active" id="modeRecBtn" onclick="setEdMode('rec')">🔁 Récurrent (jour de la semaine)</button>
+        <button class="ed-mode-btn active" id="modeRecBtn" onclick="setEdMode('rec')">🔁 Récurrent</button>
         <button class="ed-mode-btn" id="modeSpecBtn" onclick="setEdMode('spec')">📅 Date spécifique</button>
       </div>
       <!-- Mode récurrent : 7 jours -->
@@ -966,13 +966,13 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
    CONSTANTES
 ══════════════════════════════════════ */
 const LEVELS = [
-  {name:"Rookie",min:0,max:200,e:"🎽"},
-  {name:"Espoir",min:200,max:500,e:"⛸️"},
-  {name:"Junior",min:500,max:1000,e:"🏒"},
-  {name:"Elite",min:1000,max:2000,e:"🛡️"},
-  {name:"All-Star",min:2000,max:3500,e:"⭐"},
-  {name:"Légende",min:3500,max:5500,e:"🌟"},
-  {name:"GOAT",min:5500,max:99999,e:"🏆"},
+  {name:"Rookie",min:0,max:2000,e:"🎽"},
+  {name:"Espoir",min:2000,max:5000,e:"⛸️"},
+  {name:"Junior",min:5000,max:10000,e:"🏒"},
+  {name:"Elite",min:10000,max:15000,e:"🛡️"},
+  {name:"All-Star",min:15000,max:25000,e:"⭐"},
+  {name:"Légende",min:25000,max:45000,e:"🌟"},
+  {name:"GOAT",min:45000,max:99999,e:"🏆"},
 ];
 const DAY_S=["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
 const DAY_F=["Dimanche","Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi"];
@@ -2784,25 +2784,34 @@ function setTimeFromSeconds(secs){
   updateTimeLive();
 }
 function saveEx(){
-  const name=document.getElementById("exName").value.trim();
-  if(!name&&document.getElementById("exType").value!=="pause"){showToast("Nom requis");return;}
-  const si=parseInt(document.getElementById("exEditSetIdx").value);
-  const ei=parseInt(document.getElementById("exEditExIdx").value);
-  const ex={
-    name:name||"Pause",
-    type:document.getElementById("exType").value,
-    reps:parseInt(document.getElementById("exReps").value)||8,
-    series:parseInt(document.getElementById("exSeries").value)||1,
-    time:getTimeInSeconds(),
-    color:document.getElementById("exColor").value,
-    desc:document.getElementById("exDesc").value.trim(),
-    bip:document.getElementById("exBip").value||"triple",
-    manual:document.getElementById("exManual").checked||false,
-  };
-  if(ei>=0)edSets[si].exercises[ei]=ex;
-  else edSets[si].exercises.push(ex);
-  renderEdSets();calcLiveDur();closeOv("ovEx");
-  showToast(ei>=0?"Exercice modifié ✓":"Exercice ajouté ✓");
+  try{
+    const name=document.getElementById("exName").value.trim();
+    const type=document.getElementById("exType").value;
+    if(!name&&type!=="pause"){showToast("Nom requis");return;}
+    const si=parseInt(document.getElementById("exEditSetIdx").value);
+    const ei=parseInt(document.getElementById("exEditExIdx").value);
+    // Vérifier que le set existe
+    if(si<0||si>=edSets.length){showToast("Erreur : set introuvable");return;}
+    if(!edSets[si].exercises) edSets[si].exercises=[];
+    const ex={
+      name:name||"Pause",
+      type:type,
+      reps:Math.max(1,parseInt(document.getElementById("exReps").value)||8),
+      series:Math.max(1,parseInt(document.getElementById("exSeries").value)||1),
+      time:getTimeInSeconds(),
+      color:document.getElementById("exColor").value||"purple",
+      desc:document.getElementById("exDesc").value.trim(),
+      bip:document.getElementById("exBip").value||"triple",
+      manual:document.getElementById("exManual")?.checked||false,
+    };
+    if(ei>=0) edSets[si].exercises[ei]=ex;
+    else edSets[si].exercises.push(ex);
+    renderEdSets();calcLiveDur();closeOv("ovEx");
+    showToast(ei>=0?"Exercice modifié ✓":"Exercice ajouté ✓");
+  }catch(err){
+    console.error("saveEx error:",err);
+    showToast("Erreur lors de l'enregistrement");
+  }
 }
 function saveProg(){
   const name=document.getElementById("edName").value.trim();
@@ -2839,7 +2848,7 @@ function wDesc(c){if(c===0)return"Ciel dégagé";if(c<=2)return"Partiellement nu
 ══════════════════════════════════════ */
 function showLevelUp(lvl){
   document.getElementById("luTitle").textContent=lvl.e+" Tu es maintenant "+lvl.name+" !";
-  document.getElementById("luText").textContent="Incroyable Paul ! Niveau "+(LEVELS.indexOf(lvl)+1)+" atteint. Chaque séance te rapproche des pros. Continue, #85 !";
+  document.getElementById("luText").textContent="Incroyable Paul ! Niveau "+(LEVELS.indexOf(lvl)+1)+" atteint. Chaque séance te rapproche des pros. Continue, #97 !";
   openOv("ovLevelup");
   speakName("Bravo Paul ! Niveau "+lvl.name+" atteint !");
 }
