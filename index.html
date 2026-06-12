@@ -420,6 +420,11 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
 /* ── TIMER MANUAL BADGE ── */
 .manual-icon{font-size:10px;color:rgba(175,30,45,.8);margin-left:4px;vertical-align:middle;}
 
+/* ── BOUTON SAVE UNSAVED ── */
+@keyframes pulseSave{0%,100%{box-shadow:0 4px 12px rgba(175,30,45,.4)}50%{box-shadow:0 4px 22px rgba(175,30,45,.85),0 0 0 4px rgba(175,30,45,.2)}}
+.save-dirty{animation:pulseSave 1.4s ease-in-out infinite!important;position:relative;}
+.save-dirty::after{content:"●";position:absolute;top:-5px;right:-5px;width:14px;height:14px;background:#ff3b3b;border-radius:50%;font-size:8px;display:flex;align-items:center;justify-content:center;border:2px solid #0d0d1a;color:transparent;}
+
 /* TOAST */
 .toast{position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--surf2);border:1px solid var(--border2);border-radius:30px;padding:9px 20px;font-size:13px;font-weight:700;opacity:0;transition:all .3s cubic-bezier(.4,0,.2,1);z-index:500;white-space:nowrap;pointer-events:none;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -793,7 +798,7 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
     <!-- Header éditeur : status + bouton save -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px 0;">
       <div class="fb-status" style="margin:0;"><div class="fb-dot" id="fbDot"></div><span id="fbTxt">Mode local</span></div>
-      <button onclick="saveCurrent()" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--red);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(175,30,45,.4);">💾 Sauvegarder</button>
+      <button id="btnSaveCurrent" onclick="saveCurrent()" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--red);border:none;border-radius:10px;color:#fff;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(175,30,45,.4);">💾 Sauvegarder</button>
     </div>
     <!-- Onglets éditeur -->
     <div class="ed-tabs">
@@ -834,12 +839,12 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
     <!-- Program name + live duration -->
     <div class="ed-toolbar">
       <div class="ed-prog-name-row">
-        <input class="ed-input" id="edName" placeholder="Nom du programme (ex: Force & Gainage)" oninput="calcLiveDur()" />
+        <input class="ed-input" id="edName" placeholder="Nom du programme (ex: Force & Gainage)" oninput="calcLiveDur();markDirty();" />
         <div class="ed-dur-live" id="liveDur">—<small>MIN</small></div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
         <span style="font-size:20px;flex-shrink:0;">🎵</span>
-        <input class="ed-input" id="edSpotify" placeholder="Lien Spotify (playlist, album...)" style="flex:1;" />
+        <input class="ed-input" id="edSpotify" placeholder="Lien Spotify (playlist, album...)" style="flex:1;" oninput="markDirty();" />
       </div>
     </div>
     <!-- Sets list -->
@@ -1042,18 +1047,57 @@ function loadLocal(){
 }
 function saveLocal(){localStorage.setItem("ph_v3",JSON.stringify(S));}
 
-// ── FIREBASE : écriture ────────────────────────────────────────────────────
+// ── FIREBASE : écriture avec debounce + retry ─────────────────────────────
 let _fbWritePending=false;
+let _fbSaveTimer=null;
+let _fbRetryCount=0;
+
 function fbSave(){
-  if(!window._fb?.ready){ _fbIgnoreNext=false; return; }
-  if(_fbWritePending){ _fbIgnoreNext=false; return; }
+  // Debounce : regroupe les appels rapprochés en un seul write 500ms plus tard
+  if(_fbSaveTimer) clearTimeout(_fbSaveTimer);
+  _fbSaveTimer=setTimeout(_doFbSave, 500);
+}
+
+function _doFbSave(){
+  _fbSaveTimer=null;
+  if(!window._fb?.ready){
+    // Firebase pas encore prêt — réessayer dans 2s
+    setTimeout(_doFbSave, 2000);
+    return;
+  }
+  if(_fbWritePending){
+    // Write déjà en cours — réessayer dans 1s (au lieu d'abandonner)
+    setTimeout(_doFbSave, 1000);
+    return;
+  }
   _fbWritePending=true;
-  const dataToWrite=JSON.parse(JSON.stringify(S)); // snapshot immuable
+  _fbRetryCount=0;
+  const dataToWrite=JSON.parse(JSON.stringify(S));
   try{
     window._fb.set(window._fb.ref(window._fb.db,"paul85"), dataToWrite)
-      .then(()=>{ _fbWritePending=false; updFbStatus("ok"); })
-      .catch(e=>{ _fbWritePending=false; _fbIgnoreNext=false; console.warn("fbSave error",e); });
-  }catch(e){ _fbWritePending=false; _fbIgnoreNext=false; }
+      .then(()=>{
+        _fbWritePending=false;
+        _fbRetryCount=0;
+        updFbStatus("ok");
+      })
+      .catch(e=>{
+        _fbWritePending=false;
+        _fbIgnoreNext=false;
+        console.warn("fbSave error",e);
+        // Retry automatique (max 3 fois, délai croissant)
+        if(_fbRetryCount<3){
+          _fbRetryCount++;
+          setTimeout(_doFbSave, _fbRetryCount*2000);
+        } else {
+          updFbStatus("error");
+        }
+      });
+  }catch(e){
+    _fbWritePending=false;
+    _fbIgnoreNext=false;
+    _fbRetryCount++;
+    if(_fbRetryCount<3) setTimeout(_doFbSave, _fbRetryCount*2000);
+  }
 }
 
 // ── FIREBASE : listener temps-réel ────────────────────────────────────────
@@ -1101,7 +1145,10 @@ function updFbStatus(state){
   if(!d) return;
   if(state==="ok"){
     d.className="fb-dot ok";
-    t.textContent="Firebase connecté — sync temps réel actif ✓";
+    t.textContent="Firebase connecté — sync actif ✓";
+  } else if(state==="error"){
+    d.className="fb-dot error";
+    t.textContent="Firebase : erreur de sync ⚠️";
   } else {
     d.className="fb-dot";
     t.textContent="Firebase : connexion en cours...";
@@ -1110,9 +1157,30 @@ function updFbStatus(state){
 
 function persist(){
   saveLocal();
-  _fbIgnoreNext=true;  // on va écrire, on ne veut pas se re-lire immédiatement
+  _fbIgnoreNext=true;
   fbSave();
 }
+
+// Sauvegarde automatique toutes les 30s (filet de sécurité)
+setInterval(()=>{
+  if(window._fb?.ready && !_fbWritePending){
+    _fbIgnoreNext=true;
+    fbSave();
+  }
+}, 30000);
+
+// Sauvegarde quand l'utilisateur quitte la page / change d'app
+window.addEventListener('beforeunload', ()=>{ saveLocal(); });
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='hidden'){
+    saveLocal();
+    // Tentative d'écriture Firebase (best-effort avant fermeture)
+    if(window._fb?.ready && !_fbWritePending){
+      _fbIgnoreNext=true;
+      _doFbSave();
+    }
+  }
+});
 
 function renderAll(){
   if(document.getElementById("page-planning").classList.contains("active"))renderPlanning();
@@ -2435,6 +2503,20 @@ function checkPin(){
 }
 function lockEd(){document.getElementById("pinLock").style.display="block";document.getElementById("editorContent").style.display="none";document.getElementById("pinInput").value="";}
 
+// ── INDICATEUR MODIFICATIONS NON SAUVEGARDÉES ──
+let _editorDirty=false;
+function markDirty(){
+  if(_editorDirty) return;
+  _editorDirty=true;
+  const btn=document.getElementById("btnSaveCurrent");
+  if(btn) btn.classList.add("save-dirty");
+}
+function markClean(){
+  _editorDirty=false;
+  const btn=document.getElementById("btnSaveCurrent");
+  if(btn) btn.classList.remove("save-dirty");
+}
+
 function renderEdProgSelector(){
   const wrap=document.getElementById("edProgSelector");
   if(!wrap) return;
@@ -2485,6 +2567,7 @@ function switchEdTab(tab){
 function saveCurrent(){
   if(_currentEdTab==="programs"){ saveProg(); }
   else { showToast("✓ Paramètres déjà sauvegardés en temps réel"); }
+  markClean();
 }
 
 // ── ÉDITEUR CALENDRIER ───────────────────────────────────────────────
@@ -2571,6 +2654,7 @@ function switchEdDay(k){
 function loadEdDay(k){
   edDay=k;
   edProgIdx=0;
+  markClean(); // nouveau jour chargé = état propre
   const list=_normalize(S.programs[k]);
   const prog=list[0]||{name:"",sets:[],spotify:""};
   edSets=JSON.parse(JSON.stringify(prog.sets||[]));
@@ -2594,6 +2678,7 @@ function calcLiveDur(){
   const el=document.getElementById("liveDur");
   el.innerHTML=min+"<small>MIN</small>";
   el.style.background=min>0?"var(--red)":"var(--surf2)";
+  markDirty(); // toute modification des sets déclenche le badge
 }
 
 function renderEdSets(){
@@ -2823,6 +2908,7 @@ function saveProg(){
   persist();
   if(edMode==="rec") buildEdRecBar(); else buildEdCalendar();
   renderEdProgSelector();
+  markClean();
   showToast("Programme sauvegardé ! 💾");
 }
 
