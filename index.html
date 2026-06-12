@@ -1239,6 +1239,8 @@ let AUDIO_SETTINGS = {
 };
 function loadAudioSettings(){
   try{const r=localStorage.getItem("ph_audio");if(r) AUDIO_SETTINGS={...AUDIO_SETTINGS,...JSON.parse(r)};}catch(e){}
+  // Si Firebase a des paramètres audio, les prendre en priorité
+  if(S.audioSettings) AUDIO_SETTINGS={...AUDIO_SETTINGS,...S.audioSettings};
 }
 function saveSettings(){
   AUDIO_SETTINGS.volVoice=parseFloat(document.getElementById("volVoice")?.value||1);
@@ -1253,12 +1255,28 @@ function saveSettings(){
   const bgRate=document.getElementById("bgVoiceRate");
   if(bgRate) AUDIO_SETTINGS.bgVoiceRate=parseFloat(bgRate.value||0.85);
   localStorage.setItem("ph_audio",JSON.stringify(AUDIO_SETTINGS));
+  // Sauvegarder aussi dans S pour la sync Firebase
+  S.audioSettings=JSON.parse(JSON.stringify(AUDIO_SETTINGS));
+  persist();
 }
 
 function getAudioCtx(){
   if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  // iOS/Safari : reprendre si suspendu (nécessite un geste utilisateur)
+  if(audioCtx.state==="suspended") audioCtx.resume();
   return audioCtx;
 }
+
+// Débloquer AudioContext au premier geste (bouton, tap)
+function _unlockAudio(){
+  if(audioCtx&&audioCtx.state==="suspended") audioCtx.resume();
+  // Débloquer SpeechSynthesis sur iOS (nécessite cancel+speak dans un geste)
+  if('speechSynthesis' in window){
+    window.speechSynthesis.cancel();
+  }
+}
+document.addEventListener('click', _unlockAudio, {once:true});
+document.addEventListener('touchstart', _unlockAudio, {once:true});
 
 function playBeep(freq=880, dur=0.12, vol=0.4, delay=0, type="sine"){
   try{
@@ -1358,22 +1376,16 @@ function duckAudio(isVoice){
   }catch(e){}
 }
 
-// Wrapper speak() avec ducking
-const _origSpeak = speak;
 function speakWithDuck(text, rate, pitch, delay){
   duckAudio(true);
-  // Appel speak original
-  _origSpeak(text, rate, pitch, delay);
-  // Remonter après estimation durée (mots × 400ms + marge)
-  const est=Math.max(1500, text.split(" ").length * 400 + 1000);
-  setTimeout(()=>duckAudio(false), delay + est);
+  speak(text, rate, pitch, delay);
+  const est=Math.max(1500, (text||"").split(" ").length * 400 + 1000);
+  setTimeout(()=>duckAudio(false), (delay||80) + est);
 }
 
 function startBgVoice(){
   if(!AUDIO_SETTINGS.bgVoiceEnabled) return;
-  stopBgVoice();
-  _releaseWakeLock();
-  _bgWorker&&_bgWorker.postMessage({cmd:'stop'});
+  stopBgVoice(); // arrêter une éventuelle boucle précédente
   const raw = AUDIO_SETTINGS.bgVoiceText || "";
   _bgVoicePhrases = raw.split(/[.!?]+/).map(s=>s.trim()).filter(s=>s.length>2);
   if(!_bgVoicePhrases.length) return;
@@ -1579,7 +1591,10 @@ function speak(text, rate=0.92, pitch=1.05, delay=80){
   if(!('speechSynthesis' in window)) return;
   window.speechSynthesis.cancel();
   const u=new SpeechSynthesisUtterance(text);
-  u.lang="fr-FR"; u.rate=rate; u.pitch=pitch; u.volume=1;
+  u.lang="fr-FR";
+  u.rate=rate||AUDIO_SETTINGS.rateVoice||0.92;
+  u.pitch=pitch||1.05;
+  u.volume=AUDIO_SETTINGS.volVoice||1.0; // utilise le slider volume
   const v=getSelectedVoice(); if(v){ u.voice=v; u.lang=v.lang; }
   setTimeout(()=>window.speechSynthesis.speak(u), delay);
 }
@@ -1639,8 +1654,12 @@ if("speechSynthesis" in window){
    NAVIGATION
 ══════════════════════════════════════ */
 function goFromSplash(){
-  // Unlock AudioContext on first user gesture (required by browsers)
-  try{ const ctx=new(window.AudioContext||window.webkitAudioContext)();ctx.resume(); }catch(e){}
+  // Débloquer audio au premier geste (requis par iOS/Safari)
+  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  audioCtx.resume();
+  window.speechSynthesis && window.speechSynthesis.cancel();
+  // Charger les voix (peut être tardif sur certains navigateurs)
+  loadVoices();
   switchPage("planning",document.querySelector(".bnav-btn"));
 }
 
