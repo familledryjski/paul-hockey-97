@@ -1000,18 +1000,48 @@ const DEF_VIDEO_FOLDERS=[
    STATE
 ══════════════════════════════════════ */
 // S démarre VIDE — les données viennent de localStorage puis Firebase
+const APP_VERSION = "4.2"; // Incrémenter à chaque mise à jour majeure
+
 let S={xp:0,sessions:[],streak:0,lastDate:null,feelings:[],
   videoFolders:JSON.parse(JSON.stringify(DEF_VIDEO_FOLDERS)),
   pin:"1234",
   programs:{}};
 
 function _migratePrograms(){
-  // Migration: S.programs[key] = {name,sets,...} → [{name,sets,...}]
+  // Migration 1: S.programs[key] = {name,sets,...} → [{name,sets,...}]
   if(!S.programs) S.programs={};
   Object.keys(S.programs).forEach(k=>{
     const v=S.programs[k];
     if(v && !Array.isArray(v)) S.programs[k]=[v];
   });
+  // Migration 2: exercices — ajouter champs manquants avec valeurs par défaut
+  Object.keys(S.programs).forEach(k=>{
+    (_normalize(S.programs[k])).forEach(prog=>{
+      (prog.sets||[]).forEach(set=>{
+        if(!set.repeats) set.repeats=1;
+        (set.exercises||[]).forEach(ex=>{
+          if(!ex.type) ex.type="reps";
+          if(!ex.bip) ex.bip="bip";
+          if(ex.bip && !["none","bip"].includes(ex.bip)) ex.bip="bip"; // anciens bips → bip
+          if(!ex.color) ex.color="purple";
+          if(ex.series===undefined) ex.series=1;
+          if(ex.reps===undefined) ex.reps=8;
+          if(ex.time===undefined) ex.time=30;
+        });
+      });
+    });
+  });
+  // Migration 3: sessions — ajouter champs manquants
+  (S.sessions||[]).forEach(s=>{
+    if(!s.xp) s.xp=0;
+    if(!s.steps) s.steps=0;
+    if(!s.name) s.name="Séance";
+  });
+  // Sauvegarder la version migrée
+  if(S._version !== APP_VERSION){
+    S._version = APP_VERSION;
+    saveLocal();
+  }
 }
 
 function _repairXP(){
@@ -1314,7 +1344,7 @@ function playBipById(id){
 // Aliases pour compatibilité
 function playTripleBeep(){ playTripleBell(); }
 function playSetBeep(){ playTripleBell(); }
-function playStartBeep(){ playBell(); }
+function playStartBeep(){ playBell(); } // alias
 
 // ── SÉLECTEUR DE BIP dans la modale ──
 let _selBip="triple";
@@ -1489,14 +1519,14 @@ function speak(text, rate, pitch, delay){
 function speakName(text){ speak(text); }
 
 function announceExercise(name){
-  playBell();                          // cloche 1 sec avant la voix
-  speak(name, 0.9, 1.05, 600);        // voix après la cloche
+  // La cloche a déjà sonné dans _workerTick → juste dire le nom
+  speak(name, 0.9, 1.05, 300);
 }
 
 // Annonce pause : "Pause X secondes" + phrase de récup
 function announcePause(secs){
-  const label = secs>=60 ? "Pause de "+Math.round(secs/60)+" minutes" : "Pause de "+secs+" secondes";
-  speak(label, 0.88, 1.0, 350);
+  const label = secs>=60 ? "Pause "+Math.round(secs/60)+" minutes" : "Pause "+secs+" secondes";
+  speak(label, 0.88, 1.0, 400);
 }
 
 // Annonce changement de série
@@ -1507,8 +1537,9 @@ function announceSeriesBreak(label){
 // Comptage à rebours sur les 3 dernières secondes
 let _countdownSpoken = false;
 function maybeCountdown(rem, tot){
-  if(rem>=1 && rem<=3){
-    playCountdownBip(rem); // 3→grave, 2→medium, 1→aigu
+  // BIP aux 3 dernières secondes : 3→grave, 2→medium, 1→aigu+fort
+  if(rem>=1 && rem<=3 && tot>3){
+    playCountdownBip(rem);
   }
 }
 
@@ -1799,8 +1830,9 @@ function _workerTick(){
     _bgWorker&&_bgWorker.postMessage({cmd:'stop'});
     TM.running=false;
     document.getElementById("btnPlay").textContent="▶";
-    playBipById(TM._currentBip||"triple");
-    setTimeout(()=>tNext(),900);
+    // CLOCHE à rem=0 → signal de fin + passage exercice suivant
+    playBell();
+    setTimeout(()=>tNext(), 800); // laisser la cloche sonner avant de changer
   }
 }
 
@@ -1874,7 +1906,8 @@ function startWorkout(progIdx){
   document.getElementById("navTimer").style.display="flex";
   switchPage("timer",document.getElementById("navTimer"));
   // Short countdown voice before first exercise
-  speak("C'est parti Paul ! Bonne séance !", 0.9, 1.1, 300);
+  playBell(); // cloche de départ
+  speak("C'est parti Paul ! Bonne séance !", 0.9, 1.1, 600);
   // Lancer la voix de fond après 5s
   setTimeout(()=>loadStep(0), 1800);
 }
@@ -1965,7 +1998,11 @@ function setRingPct(pct){document.getElementById("timerRing").style.strokeDashof
 function tToggle(){
   const s=TM.steps[TM.idx];
   if(!s)return;
-  if(s.type==="reps"||s.type==="reps_time"){tNext();return;}
+  if(s.type==="reps"||s.type==="reps_time"){
+    playBell(); // cloche manuelle pour valider les reps
+    setTimeout(()=>tNext(), 600);
+    return;
+  }
   if(TM.running){
     TM.running=false;
     _bgWorker&&_bgWorker.postMessage({cmd:'stop'});
