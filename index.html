@@ -893,32 +893,7 @@ input:checked+.toggle-slider::before{transform:translateX(20px);}
       </div>
 
       <!-- VOIX DE FOND -->
-      <div class="settings-card">
-        <div class="settings-title">🎙️ Voix d'encouragement (fond)</div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">Phrases motivantes répétées en boucle pendant la séance</div>
-        <div class="range-row" style="align-items:center;gap:10px;">
-          <label style="flex:1;">Activer la voix de fond</label>
-          <label class="toggle-switch">
-            <input type="checkbox" id="bgVoiceEnabled" onchange="saveSettings();" />
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="fg" style="margin-top:10px;">
-          <label>Texte (séparé par des points)</label>
-          <textarea id="bgVoiceText" rows="3" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;color:var(--text);font-size:12px;resize:vertical;" oninput="saveSettings();">Allez Paul ! Tu es un champion ! Vas-y ! Force et courage ! Continue ! Tu es le meilleur !</textarea>
-        </div>
-        <div class="range-row">
-          <label>🔊 Volume fond</label>
-          <input type="range" id="bgVoiceVolume" min="0" max="1" step="0.05" value="0.4" oninput="updateVolLabel('bgVoiceVolume','bgVoiceVolumeVal');saveSettings();" />
-          <span class="range-val" id="bgVoiceVolumeVal">40%</span>
-        </div>
-        <div class="range-row">
-          <label>🎵 Débit fond</label>
-          <input type="range" id="bgVoiceRate" min="0.5" max="1.5" step="0.05" value="0.85" oninput="updateVolLabel('bgVoiceRate','bgVoiceRateVal',true);saveSettings();" />
-          <span class="range-val" id="bgVoiceRateVal">0.85</span>
-        </div>
-        <button class="test-btn" onclick="testBgVoice()" style="margin-top:8px;">▶ Tester la voix de fond</button>
-      </div>
+
     </div>
 
     </div><!-- /edTab-params -->
@@ -1228,14 +1203,10 @@ let audioCtx=null;
 
 // ── Paramètres audio sauvegardés ──
 let AUDIO_SETTINGS = {
-  voiceIdx: -1,       // -1 = auto (première voix FR)
+  voiceIdx: -1,   // -1 = auto (première voix FR)
   volVoice: 1.0,
   volBip: 0.5,
   rateVoice: 0.92,
-  bgVoiceEnabled: false,   // voix de fond activée
-  bgVoiceText: "Allez Paul ! Tu es un champion ! Vas-y ! Force et courage ! Continue ! Tu es le meilleur !",
-  bgVoiceVolume: 0.4,
-  bgVoiceRate: 0.85,
 };
 function loadAudioSettings(){
   try{const r=localStorage.getItem("ph_audio");if(r) AUDIO_SETTINGS={...AUDIO_SETTINGS,...JSON.parse(r)};}catch(e){}
@@ -1246,52 +1217,59 @@ function saveSettings(){
   AUDIO_SETTINGS.volVoice=parseFloat(document.getElementById("volVoice")?.value||1);
   AUDIO_SETTINGS.volBip=parseFloat(document.getElementById("volBip")?.value||0.5);
   AUDIO_SETTINGS.rateVoice=parseFloat(document.getElementById("rateVoice")?.value||0.92);
-  const bgEn=document.getElementById("bgVoiceEnabled");
-  if(bgEn) AUDIO_SETTINGS.bgVoiceEnabled=bgEn.checked;
-  const bgTxt=document.getElementById("bgVoiceText");
-  if(bgTxt) AUDIO_SETTINGS.bgVoiceText=bgTxt.value||AUDIO_SETTINGS.bgVoiceText;
-  const bgVol=document.getElementById("bgVoiceVolume");
-  if(bgVol) AUDIO_SETTINGS.bgVoiceVolume=parseFloat(bgVol.value||0.4);
-  const bgRate=document.getElementById("bgVoiceRate");
-  if(bgRate) AUDIO_SETTINGS.bgVoiceRate=parseFloat(bgRate.value||0.85);
   localStorage.setItem("ph_audio",JSON.stringify(AUDIO_SETTINGS));
-  // Sauvegarder aussi dans S pour la sync Firebase
   S.audioSettings=JSON.parse(JSON.stringify(AUDIO_SETTINGS));
   persist();
 }
 
 function getAudioCtx(){
-  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  // iOS/Safari : reprendre si suspendu (nécessite un geste utilisateur)
-  if(audioCtx.state==="suspended") audioCtx.resume();
-  return audioCtx;
-}
-
-// Débloquer AudioContext au premier geste (bouton, tap)
-function _unlockAudio(){
-  if(audioCtx&&audioCtx.state==="suspended") audioCtx.resume();
-  // Débloquer SpeechSynthesis sur iOS (nécessite cancel+speak dans un geste)
-  if('speechSynthesis' in window){
-    window.speechSynthesis.cancel();
-  }
-}
-document.addEventListener('click', _unlockAudio, {once:true});
-document.addEventListener('touchstart', _unlockAudio, {once:true});
-
-function playBeep(freq=880, dur=0.12, vol=0.4, delay=0, type="sine"){
   try{
-    const v = vol * AUDIO_SETTINGS.volBip * 2; // scale
-    if(v <= 0) return;
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+    return audioCtx;
+  }catch(e){ return null; }
+}
+
+// Débloquer audio au premier geste (requis iOS/Safari)
+function _unlockAudio(){
+  try{
+    if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+    // Bip silencieux de 1ms pour "débloquer" le contexte
+    const ctx=audioCtx;
+    const o=ctx.createOscillator();
+    const g=ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.001, ctx.currentTime);
+    o.start(ctx.currentTime);
+    o.stop(ctx.currentTime+0.001);
+  }catch(e){}
+  if('speechSynthesis' in window) window.speechSynthesis.cancel();
+}
+document.addEventListener('click', _unlockAudio, {once:false});
+document.addEventListener('touchstart', _unlockAudio, {once:false});
+
+function playBeep(freq=880, dur=0.15, vol=0.5, delay=0, type="sine"){
+  try{
     const ctx=getAudioCtx();
+    if(!ctx) return;
+    // Volume final : vol × slider (0-1), plafonné à 1
+    const v = Math.min(1.0, vol * (AUDIO_SETTINGS.volBip||0.5));
+    if(v <= 0.001) return;
     const osc=ctx.createOscillator();
     const gain=ctx.createGain();
-    osc.connect(gain);gain.connect(ctx.destination);
-    osc.type=type;osc.frequency.value=freq;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type=type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
     const t=ctx.currentTime+delay;
-    gain.gain.setValueAtTime(v,t);
-    gain.gain.exponentialRampToValueAtTime(0.001,t+dur);
-    osc.start(t);osc.stop(t+dur+0.05);
-  }catch(e){}
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(v, t+0.01);       // attaque douce
+    gain.gain.setValueAtTime(v, t+dur-0.02);
+    gain.gain.linearRampToValueAtTime(0.001, t+dur);    // release
+    osc.start(t);
+    osc.stop(t+dur+0.01);
+  }catch(e){ console.warn("playBeep error:", e); }
 }
 
 // ── TYPES DE BIPS ──
@@ -1344,11 +1322,6 @@ function pickBip(id){
   // Preview
   playBipById(id);
 }
-// ── VOIX DE FOND (boucle pendant séance) ──
-let _bgVoiceTimer = null;
-let _bgVoicePhrases = [];
-let _bgVoicePhraseIdx = 0;
-
 // ── SPOTIFY ──
 function openSpotifyPlayer(){
   if(!_currentSpotifyUrl) return;
@@ -1376,63 +1349,9 @@ function duckAudio(isVoice){
   }catch(e){}
 }
 
-function speakWithDuck(text, rate, pitch, delay){
-  duckAudio(true);
-  speak(text, rate, pitch, delay);
-  const est=Math.max(1500, (text||"").split(" ").length * 400 + 1000);
-  setTimeout(()=>duckAudio(false), (delay||80) + est);
-}
+// speakWithDuck remplacé par speak direct
 
-function startBgVoice(){
-  if(!AUDIO_SETTINGS.bgVoiceEnabled) return;
-  stopBgVoice(); // arrêter une éventuelle boucle précédente
-  const raw = AUDIO_SETTINGS.bgVoiceText || "";
-  _bgVoicePhrases = raw.split(/[.!?]+/).map(s=>s.trim()).filter(s=>s.length>2);
-  if(!_bgVoicePhrases.length) return;
-  _bgVoicePhraseIdx = 0;
-  _scheduleBgVoice();
-}
 
-function _scheduleBgVoice(){
-  if(!AUDIO_SETTINGS.bgVoiceEnabled || !_bgVoicePhrases.length) return;
-  const phrase = _bgVoicePhrases[_bgVoicePhraseIdx % _bgVoicePhrases.length];
-  _bgVoicePhraseIdx++;
-  const v = getSelectedVoice();
-  if(!v) return;
-  const u = new SpeechSynthesisUtterance(phrase);
-  u.voice = v;
-  u.lang = v.lang;
-  u.rate = AUDIO_SETTINGS.bgVoiceRate || 0.85;
-  u.volume = AUDIO_SETTINGS.bgVoiceVolume || 0.4;
-  u.onend = ()=>{
-    if(AUDIO_SETTINGS.bgVoiceEnabled){
-      // Pause 8-14s entre chaque phrase
-      const delay = 8000 + Math.random()*6000;
-      _bgVoiceTimer = setTimeout(_scheduleBgVoice, delay);
-    }
-  };
-  window.speechSynthesis.speak(u);
-}
-
-function stopBgVoice(){
-  if(_bgVoiceTimer){ clearTimeout(_bgVoiceTimer); _bgVoiceTimer=null; }
-  // On n'annule pas le speechSynthesis principal, juste le timer
-}
-
-function testBgVoice(){
-  const raw = document.getElementById("bgVoiceText")?.value || AUDIO_SETTINGS.bgVoiceText;
-  const phrases = raw.split(/[.!?]+/).map(s=>s.trim()).filter(s=>s.length>2);
-  if(!phrases.length){ showToast("Aucune phrase à tester"); return; }
-  const phrase = phrases[0];
-  const v = getSelectedVoice();
-  if(!v){ showToast("Aucune voix disponible"); return; }
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(phrase);
-  u.voice=v; u.lang=v.lang;
-  u.rate = parseFloat(document.getElementById("bgVoiceRate")?.value || AUDIO_SETTINGS.bgVoiceRate || 0.85);
-  u.volume = parseFloat(document.getElementById("bgVoiceVolume")?.value || AUDIO_SETTINGS.bgVoiceVolume || 0.4);
-  window.speechSynthesis.speak(u);
-}
 
 // ── GESTION DES VOIX TTS ──
 let _allVoices=[];
@@ -1532,113 +1451,53 @@ function initSettingsUI(){
   if(vb){ vb.value=AUDIO_SETTINGS.volBip; updateVolLabel("volBip","volBipVal"); }
   if(rv){ rv.value=AUDIO_SETTINGS.rateVoice; updateVolLabel("rateVoice","rateVoiceVal",true); }
   // voix de fond
-  const bgEn=document.getElementById("bgVoiceEnabled");
-  if(bgEn) bgEn.checked=!!AUDIO_SETTINGS.bgVoiceEnabled;
-  const bgTxt=document.getElementById("bgVoiceText");
-  if(bgTxt) bgTxt.value=AUDIO_SETTINGS.bgVoiceText||"";
-  const bgVol=document.getElementById("bgVoiceVolume");
-  if(bgVol){ bgVol.value=AUDIO_SETTINGS.bgVoiceVolume||0.4; updateVolLabel("bgVoiceVolume","bgVoiceVolumeVal"); }
-  const bgRate=document.getElementById("bgVoiceRate");
-  if(bgRate){ bgRate.value=AUDIO_SETTINGS.bgVoiceRate||0.85; updateVolLabel("bgVoiceRate","bgVoiceRateVal",true); }
   renderVoiceList();
 }
 
 // ── PHRASES DE MOTIVATION (adaptées 11-12 ans) ──
-const MOTIV_EXERCISE = [
-  "C'est parti, donne tout !",
-  "Allez Paul, tu gères !",
-  "Force et courage !",
-  "Tu es le meilleur !",
-  "Vas-y, montre ce que tu sais faire !",
-  "Sois fort, Paul !",
-  "Champions en action !",
-  "Tu peux le faire !",
-  "Brûle tout !",
-  "C'est pour toi que tu t'entraînes !",
-  "Tu es un vrai Canadien !",
-  "Pas de limite, allez !",
-  "Engage-toi à fond !",
-];
-const MOTIV_PAUSE = [
-  "Récupère bien, tu vas tout déchirer après !",
-  "Respire… la suite va être encore mieux !",
-  "Beau travail ! Souffle et reprends des forces.",
-  "Tu assures vraiment ! Prépare-toi pour la suite.",
-  "C'est normal de souffler. Les pros le font aussi !",
-  "Hydrate-toi si besoin. Tu es au top !",
-  "Récupère… et pense à la prochaine glace !",
-  "Bien joué ! Le repos fait partie de l'entraînement.",
-];
-const MOTIV_SERIES = [
-  "Série terminée ! Tu es en feu !",
-  "Encore une série dans les pattes. Impressionnant !",
-  "Voilà, une série de plus ! Continue comme ça !",
-  "Top ! La prochaine série, encore plus fort !",
-];
-const MOTIV_MID = [
-  "À mi-chemin, continue !",
-  "Tu es lancé, garde ce rythme !",
-  "Trois… deux… un… tiens bon !",
-  "Presque fini, ne lâche pas !",
-  "Encore un effort, tu y es presque !",
-];
-
-function rnd(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
 
 
-function speak(text, rate=0.92, pitch=1.05, delay=80){
-  if(!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(text);
-  u.lang="fr-FR";
-  u.rate=rate||AUDIO_SETTINGS.rateVoice||0.92;
-  u.pitch=pitch||1.05;
-  u.volume=AUDIO_SETTINGS.volVoice||1.0; // utilise le slider volume
-  const v=getSelectedVoice(); if(v){ u.voice=v; u.lang=v.lang; }
-  setTimeout(()=>window.speechSynthesis.speak(u), delay);
+
+function speak(text, rate, pitch, delay){
+  if(!('speechSynthesis' in window)||!text) return;
+  const r=rate||AUDIO_SETTINGS.rateVoice||0.92;
+  const p=pitch||1.05;
+  const d=(delay===undefined||delay===null)?80:delay;
+  const vol=Math.min(1.0, AUDIO_SETTINGS.volVoice||1.0);
+  setTimeout(()=>{
+    window.speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang="fr-FR"; u.rate=r; u.pitch=p; u.volume=vol;
+    const v=getSelectedVoice(); if(v){ u.voice=v; u.lang=v.lang; }
+    window.speechSynthesis.speak(u);
+  }, d);
 }
 
 // Alias conservé pour compatibilité (finishWorkout, levelUp l'utilisent)
 function speakName(text){ speak(text); }
 
-// Annonce exercice : nom + phrase de motivation
 function announceExercise(name){
-  playStartBeep();
-  const phrase = rnd(MOTIV_EXERCISE);
-  setTimeout(()=> speak(`${name} ! ${phrase}`, 0.9, 1.05), 350);
+  speak(name, 0.9, 1.05, 350);
 }
 
 // Annonce pause : "Pause X secondes" + phrase de récup
 function announcePause(secs){
-  playTripleBeep();
-  const label = secs >= 60
-    ? `Pause de ${Math.floor(secs/60)} minute${secs>=120?"s":""}`
-    : `Pause de ${secs} secondes`;
-  const phrase = rnd(MOTIV_PAUSE);
-  setTimeout(()=> speak(`${label}. ${phrase}`, 0.88, 1.0), 350);
+  const label = secs>=60 ? "Pause de "+Math.round(secs/60)+" minutes" : "Pause de "+secs+" secondes";
+  speak(label, 0.88, 1.0, 350);
 }
 
 // Annonce changement de série
 function announceSeriesBreak(label){
-  // Triple cloche rapide → fin de set
   playBipById("triple_bell");
-  const phrase = rnd(MOTIV_SERIES);
-  setTimeout(()=> speakWithDuck(phrase, 0.9, 1.05, 0), 700);
 }
 
 // Comptage à rebours sur les 3 dernières secondes
 let _countdownSpoken = false;
 function maybeCountdown(rem, tot){
-  // 1 bip par seconde aux 3 dernières secondes (ton montant : grave→aigu)
   if(rem<=3 && rem>0){
-    const freq=[700,800,900][rem-1]; // 1s=700Hz, 2s=800Hz, 3s=900Hz
-    playBeep(freq, 0.12, 0.55, 0, "sine");
-  }
-  // Phrase mi-parcours (une seule fois par exercice)
-  if(tot>10 && rem===Math.ceil(tot/2) && !TM._midSpoken){
-    TM._midSpoken=true;
-    speakWithDuck(rnd(MOTIV_MID), 0.9, 1.05, 0);
+    const freq=[700,800,900][rem-1];
+    playBeep(freq, 0.15, 0.6, 0, "sine");
   }
 }
 
@@ -1654,11 +1513,7 @@ if("speechSynthesis" in window){
    NAVIGATION
 ══════════════════════════════════════ */
 function goFromSplash(){
-  // Débloquer audio au premier geste (requis par iOS/Safari)
-  if(!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  audioCtx.resume();
-  window.speechSynthesis && window.speechSynthesis.cancel();
-  // Charger les voix (peut être tardif sur certains navigateurs)
+  _unlockAudio();
   loadVoices();
   switchPage("planning",document.querySelector(".bnav-btn"));
 }
@@ -2008,9 +1863,8 @@ function startWorkout(progIdx){
   document.getElementById("navTimer").style.display="flex";
   switchPage("timer",document.getElementById("navTimer"));
   // Short countdown voice before first exercise
-  speakWithDuck("C'est parti Paul ! Bonne séance !", 0.9, 1.1, 300);
+  speak("C'est parti Paul ! Bonne séance !", 0.9, 1.1, 300);
   // Lancer la voix de fond après 5s
-  setTimeout(startBgVoice, 5000);
   setTimeout(()=>loadStep(0), 1800);
 }
 
@@ -2051,7 +1905,6 @@ function loadStep(idx){
   renderUpcoming();
 
   // Voix + motivation selon le type
-  TM._midSpoken = false;
   TM._currentBip = s.bip || "triple"; // bip configuré sur cet exercice
   TM._isManual = !!(s.manual);        // déclenchement manuel ?
 
@@ -2060,7 +1913,7 @@ function loadStep(idx){
   } else if(s.name){
     // Cloche de transition + annonce du nom
     playBipById("bell");
-    setTimeout(()=>speakWithDuck(s.name, 0.9, 1.05, 0), 400);
+    setTimeout(()=>speak(s.name, 0.9, 1.05, 0), 400);
   }
 
   // Auto-start : démarre le chrono automatiquement sauf si manuel ou type reps
@@ -2144,10 +1997,9 @@ function renderUpcoming(){
 }
 
 function finishWorkout(){
-  stopBgVoice();
   clearInterval(TM.iv);
   playTripleBeep();
-  speakWithDuck("Séance terminée ! Bravo Paul, tu es un champion ! Tu es un vrai Canadien !", 0.88, 1.1, 200);
+  speak("Séance terminée ! Bravo Paul, tu es un champion ! Tu es un vrai Canadien !", 0.88, 1.1, 200);
   const xpG=50+TM.steps.filter(s=>!s._seriesBreak).length*5;
   const prevIdx=getLvlIdx();
   S.xp+=xpG;
