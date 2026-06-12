@@ -14,7 +14,7 @@ const _manifest = {
   name: "PAUL #97 — Hockey",
   short_name: "Paul #97",
   description: "Entraînement hockey sur glace — Canadiens de Montréal",
-  start_url: "https://paul-bdl.netlify.app/",
+  start_url: "./",
   display: "standalone",
   background_color: "#0d0d1a",
   theme_color: "#AF1E2D",
@@ -1633,7 +1633,6 @@ function renderPlanning(){
   calViewDate=new Date(_sd.getFullYear(),_sd.getMonth(),1);
   renderDayScroller();
   renderDayContent(_sd);
-  loadWeatherMini();
 }
 function renderDayScroller(){
   const wrap=document.getElementById("dayScroll");
