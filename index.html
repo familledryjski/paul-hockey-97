@@ -1100,11 +1100,14 @@ function _doFbSave(){
   _fbRetryCount=0;
   const dataToWrite=JSON.parse(JSON.stringify(S));
   try{
-    window._fb.set(window._fb.ref(window._fb.db,"paul85"), dataToWrite)
+    _fbIgnoreNext=true; // ignorer le onValue déclenché par notre propre write
+  window._fb.set(window._fb.ref(window._fb.db,"paul85"), dataToWrite)
       .then(()=>{
         _fbWritePending=false;
         _fbRetryCount=0;
         updFbStatus("ok");
+        // Laisser passer le prochain onValue externe (sync multi-device)
+        setTimeout(()=>{ _fbIgnoreNext=false; }, 2000);
       })
       .catch(e=>{
         _fbWritePending=false;
@@ -1137,23 +1140,22 @@ function startFbListener(){
   window._fb.onValue(
     window._fb.ref(window._fb.db,"paul85"),
     (snap)=>{
+      // Ignorer si : (1) on vient d'écrire, (2) un write est en attente, (3) un write est en cours
       if(_fbIgnoreNext){ _fbIgnoreNext=false; return; }
+      if(_fbSaveTimer){ return; }   // debounce actif = write imminent, ne pas écraser
+      if(_fbWritePending){ return; } // write en cours
       if(!snap.exists()) return;
       const remote=snap.val();
-      // Fusion prudente : on garde le local si plus récent (XP, sessions, streak)
-      // Firebase = source de vérité absolue
-      // On garde les champs non-présents dans Firebase (pin, videoFolders si absent)
+      // Appliquer les données distantes
       const prevPin=S.pin||"1234";
       const prevVideoFolders=S.videoFolders;
       S={...S,...remote};
-      // Sécurités
       if(!S.pin) S.pin=prevPin;
       if(!S.videoFolders||!S.videoFolders.length) S.videoFolders=prevVideoFolders;
       _migratePrograms();
       _repairXP();
-      saveLocal(); // mettre à jour localStorage avec les données Firebase
+      saveLocal();
       renderAll();
-      // Met à jour l'éditeur si ouvert et déverrouillé
       const edContent=document.getElementById("editorContent");
       if(edContent&&edContent.style.display!=="none"){
         if(edMode==="rec") buildEdRecBar(); else buildEdCalendar();
@@ -1181,7 +1183,7 @@ function updFbStatus(state){
 
 function persist(){
   saveLocal();
-  _fbIgnoreNext=true;
+  _fbIgnoreNext=true;  // Bloquer onValue pendant le debounce ET le write
   fbSave();
 }
 
