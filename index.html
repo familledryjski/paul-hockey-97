@@ -185,6 +185,7 @@ input,select{font-family:inherit;}
 .ex-val{font-size:13px;font-weight:800;white-space:nowrap;}
 
 .rest-day{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;text-align:center;}
+.plan-scroll{display:flex;flex-direction:column;gap:0;padding:0 0 20px;}
 
 /* ── CTA ── */
 .cta-wrap{padding:14px 20px 0;}
@@ -1023,27 +1024,52 @@ const DEF_VIDEO_FOLDERS=[
 /* ══════════════════════════════════════
    STATE
 ══════════════════════════════════════ */
+// S démarre VIDE — les données viennent de localStorage puis Firebase
 let S={xp:0,sessions:[],streak:0,lastDate:null,feelings:[],
   videoFolders:JSON.parse(JSON.stringify(DEF_VIDEO_FOLDERS)),
   pin:"1234",
-  programs:JSON.parse(JSON.stringify(DEF_PROG))};
+  programs:{}};
 
-function loadLocal(){
-  try{const r=localStorage.getItem("ph_v3");if(r){const d=JSON.parse(r);S={...S,...d};}}catch(e){}
+function _migratePrograms(){
   // Migration: S.programs[key] = {name,sets,...} → [{name,sets,...}]
-  if(S.programs){
-    Object.keys(S.programs).forEach(k=>{
-      const v=S.programs[k];
-      if(v && !Array.isArray(v)){
-        S.programs[k]=[v]; // wrap en array
-      }
-    });
-  }
-  // Auto-repair: si xp=0 mais sessions>0
+  if(!S.programs) S.programs={};
+  Object.keys(S.programs).forEach(k=>{
+    const v=S.programs[k];
+    if(v && !Array.isArray(v)) S.programs[k]=[v];
+  });
+}
+
+function _repairXP(){
+  // Auto-repair: si xp=0 mais sessions>0, recalculer
   if((S.xp||0)===0 && S.sessions && S.sessions.length>0){
     S.xp=S.sessions.reduce((sum,s)=>sum+(s.xp||0),0);
-    saveLocal();
   }
+}
+
+function _applyDefaults(){
+  // Appliquer DEF_PROG seulement si aucun programme n'existe (première utilisation)
+  if(!S.programs || !Object.keys(S.programs).length){
+    S.programs=JSON.parse(JSON.stringify(DEF_PROG));
+    _migratePrograms();
+  }
+  if(!S.videoFolders || !S.videoFolders.length){
+    S.videoFolders=JSON.parse(JSON.stringify(DEF_VIDEO_FOLDERS));
+  }
+}
+
+function loadLocal(){
+  try{
+    const r=localStorage.getItem("ph_v3");
+    if(r){
+      const d=JSON.parse(r);
+      // localStorage = source fiable → écraser S complètement
+      S={...S,...d};
+      _migratePrograms();
+      _repairXP();
+      return true; // données trouvées
+    }
+  }catch(e){ console.warn("loadLocal error",e); }
+  return false; // localStorage vide
 }
 function saveLocal(){localStorage.setItem("ph_v3",JSON.stringify(S));}
 
@@ -1115,19 +1141,17 @@ function startFbListener(){
       if(!snap.exists()) return;
       const remote=snap.val();
       // Fusion prudente : on garde le local si plus récent (XP, sessions, streak)
-      const localXp=S.xp||0;
-      const localSessions=S.sessions||[];
-      const remoteXp=remote.xp||0;
-      const remoteSessions=remote.sessions||[];
-      // Le local gagne si plus d'XP ou plus de sessions
+      // Firebase = source de vérité absolue
+      // On garde les champs non-présents dans Firebase (pin, videoFolders si absent)
+      const prevPin=S.pin||"1234";
+      const prevVideoFolders=S.videoFolders;
       S={...S,...remote};
-      if(localXp>remoteXp){ S.xp=localXp; }
-      if(localSessions.length>remoteSessions.length){ S.sessions=localSessions; S.streak=Math.max(S.streak, remote.streak||0); }
-      // Auto-repair : si xp=0 mais sessions>0
-      if((S.xp||0)===0 && S.sessions && S.sessions.length>0){
-        S.xp=S.sessions.reduce((sum,s)=>sum+(s.xp||0),0);
-      }
-      saveLocal();
+      // Sécurités
+      if(!S.pin) S.pin=prevPin;
+      if(!S.videoFolders||!S.videoFolders.length) S.videoFolders=prevVideoFolders;
+      _migratePrograms();
+      _repairXP();
+      saveLocal(); // mettre à jour localStorage avec les données Firebase
       renderAll();
       // Met à jour l'éditeur si ouvert et déverrouillé
       const edContent=document.getElementById("editorContent");
@@ -1267,6 +1291,9 @@ const BIP_TYPES = [
   { id:"beepbeep", label:"Deux fois",    icon:"⏱️", play:()=>{ playBeep(1000,0.08,0.5,0); playBeep(1000,0.08,0.5,0.15); playBeep(1200,0.2,0.6,0.4); } },
   { id:"laser",    label:"Laser",        icon:"⚡", play:()=>{ for(let i=0;i<8;i++) playBeep(1500-i*80,0.04,0.3,i*0.04,"sine"); } },
   { id:"coin",     label:"Coin 🏅",      icon:"🏅", play:()=>{ playBeep(988,0.08,0.4,0,"sine"); playBeep(1319,0.12,0.5,0.1,"sine"); playBeep(1568,0.3,0.6,0.22,"sine"); } },
+  { id:"bell",     label:"Cloche 🔕",    icon:"🔕", play:()=>{ playBeep(830,0.06,0.5,0,"sine"); playBeep(1046,0.25,0.6,0.06,"sine"); playBeep(830,0.08,0.2,0.35,"sine"); } },
+  { id:"triple_bell", label:"3x Cloche 🔔🔔🔔", icon:"🔔🔔🔔", play:()=>{ [0,0.18,0.36].forEach(d=>{ playBeep(830,0.05,0.5,d,"sine"); playBeep(1046,0.18,0.6,d+0.05,"sine"); }); } },
+  { id:"end_fanfare", label:"Fanfare fin 🎺", icon:"🎺", play:()=>{ playBeep(523,0.12,0.5,0); playBeep(659,0.12,0.5,0.15); playBeep(784,0.12,0.5,0.3); playBeep(1047,0.4,0.7,0.5); } },
 ];
 
 function playBipById(id){
@@ -1577,24 +1604,24 @@ function announcePause(secs){
 
 // Annonce changement de série
 function announceSeriesBreak(label){
-  playSetBeep();
+  // Triple cloche rapide → fin de set
+  playBipById("triple_bell");
   const phrase = rnd(MOTIV_SERIES);
-  setTimeout(()=> speak(phrase, 0.9, 1.05), 700);
+  setTimeout(()=> speakWithDuck(phrase, 0.9, 1.05, 0), 700);
 }
 
 // Comptage à rebours sur les 3 dernières secondes
 let _countdownSpoken = false;
 function maybeCountdown(rem, tot){
-  if(rem<=3 && rem>0 && !_countdownSpoken){
-    _countdownSpoken = true;
-    speak(String(rem), 1.1, 1.1, 0);
-  } else if(rem>3){
-    _countdownSpoken = false;
+  // 1 bip par seconde aux 3 dernières secondes (ton montant : grave→aigu)
+  if(rem<=3 && rem>0){
+    const freq=[700,800,900][rem-1]; // 1s=700Hz, 2s=800Hz, 3s=900Hz
+    playBeep(freq, 0.12, 0.55, 0, "sine");
   }
   // Phrase mi-parcours (une seule fois par exercice)
   if(tot>10 && rem===Math.ceil(tot/2) && !TM._midSpoken){
     TM._midSpoken=true;
-    speak(rnd(MOTIV_MID), 0.9, 1.05, 0);
+    speakWithDuck(rnd(MOTIV_MID), 0.9, 1.05, 0);
   }
 }
 
@@ -1749,6 +1776,23 @@ function selDayFn(dk, ts){
   renderDayContent(d);
 }
 
+function _exBandHtml(set){
+  // Bandes colorées horizontales scrollables (style interval timer)
+  const exs=set.exercises||[];
+  if(!exs.length) return "";
+  const rep=set.repeats||1;
+  const repLabel=rep>1?`<div style="min-width:32px;background:#111;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff;flex-shrink:0;">${rep}x</div>`:"";
+  const bands=exs.map(ex=>{
+    const bg=COLOR_HEX[ex.color]||"#555";
+    const dur=ex.type==="time"||ex.type==="pause"?fmtTime(ex.time||0):(ex.reps+"×");
+    return`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;background:${bg};min-width:90px;flex-shrink:0;gap:2px;">
+      <div style="font-size:12px;font-weight:800;color:#fff;text-align:center;line-height:1.2;">${ex.name}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,.85);font-weight:700;">${dur}</div>
+    </div>`;
+  }).join("");
+  return`<div style="display:flex;overflow-x:auto;scrollbar-width:none;border-top:1px solid rgba(255,255,255,.08);">${repLabel}${bands}</div>`;
+}
+
 function _progCardHtml(prog, progIdx, d, isSpec, showGo){
   const typeBadge=isSpec
     ?`<span style="font-size:10px;background:rgba(0,214,143,.15);color:var(--green);padding:2px 7px;border-radius:10px;font-weight:700;">★ Date spécifique</span>`
@@ -1756,44 +1800,31 @@ function _progCardHtml(prog, progIdx, d, isSpec, showGo){
   let totalSec=0;
   prog.sets.forEach(set=>{const rep=set.repeats||1;set.exercises&&set.exercises.forEach(ex=>{if(ex.type==="time"||ex.type==="pause")totalSec+=(ex.time||0)*rep;});});
   const totalMin=Math.ceil(totalSec/60)||"—";
-  let totalEx=0;prog.sets.forEach(s=>totalEx+=(s.exercises||[]).length*(s.repeats||1));
 
-  let html=`<div class="prog-card" style="background:var(--surf);border:1px solid var(--border);border-radius:var(--radius);margin:0 0 14px;overflow:hidden;">`;
-  html+=`<div class="prog-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;">
+  let html=`<div class="prog-card" style="background:var(--surf);border:1px solid var(--border);border-radius:var(--radius);margin:0 16px 14px;overflow:hidden;">`;
+  // Header : nom + durée
+  html+=`<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;">
     <div style="flex:1;min-width:0;">
-      <div style="margin-bottom:4px;">${typeBadge}</div>
-      <div class="prog-title-big">${prog.name||"Séance"}</div>
-      <div class="prog-sub">${prog.sets.length} set${prog.sets.length>1?"s":""} · ~${totalEx} blocs</div>
+      <div style="margin-bottom:3px;">${typeBadge}</div>
+      <div class="prog-title-big" style="font-size:16px;">${prog.name||"Séance"}</div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-      <div class="prog-dur-badge">${totalMin}<small>MIN</small></div>
-    </div>
+    <div class="prog-dur-badge" style="font-size:20px;min-width:54px;text-align:right;">${totalMin}<small style="font-size:9px;display:block;letter-spacing:1px;">MIN</small></div>
   </div>`;
 
-  prog.sets.forEach((set,si)=>{
-    const rep=set.repeats||1;
-    html+=`<div class="set-block" style="margin:0 16px 10px;border-radius:var(--radius-sm);overflow:hidden;">
-      <div class="set-header"><span class="set-label">Set ${si+1}</span><span class="set-count">${rep}× répétition${rep>1?"s":""}</span></div>
-      <div class="set-exercises">
-        ${(set.exercises||[]).map((ex,ei)=>`
-          <div class="ex-row c-${ex.color||"pause"}">
-            <div class="ex-num">${ei+1}</div>
-            <div class="ex-body"><div class="ex-name">${ex.name}</div>${ex.desc?`<div class="ex-desc">${ex.desc}</div>`:""}</div>
-            <div class="ex-val">${fmtExVal(ex)}</div>
-          </div>`).join("")}
-      </div>
-    </div>`;
-  });
+  // Bandes colorées par set
+  prog.sets.forEach(set=>{ html+=_exBandHtml(set); });
 
+  // Spotify
   if(prog.spotify){
-    html+=`<div style="padding:0 16px 10px;"><a href="${prog.spotify}" target="_blank" style="display:flex;align-items:center;gap:8px;background:rgba(29,185,84,.12);border:1px solid rgba(29,185,84,.3);border-radius:10px;padding:9px 14px;text-decoration:none;color:#1DB954;font-weight:700;font-size:12px;"><span>🎵</span>Ouvrir la playlist Spotify<span style="margin-left:auto;">▶</span></a></div>`;
+    html+=`<div style="padding:8px 14px 6px;"><a href="${prog.spotify}" target="_blank" style="display:flex;align-items:center;gap:8px;background:rgba(29,185,84,.12);border:1px solid rgba(29,185,84,.3);border-radius:10px;padding:8px 12px;text-decoration:none;color:#1DB954;font-weight:700;font-size:12px;"><span>🎵</span>Ouvrir la playlist Spotify<span style="margin-left:auto;">▶</span></a></div>`;
   }
 
+  // Bouton GO + actions
   if(showGo){
-    html+=`<div style="padding:0 16px 14px;">
-      <button class="cta-btn" onclick="startWorkout(${progIdx})" style="padding:14px;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-        GO — ${prog.name||"S'entraîner"}
+    html+=`<div style="display:flex;align-items:center;gap:8px;padding:8px 14px 12px;">
+      <button onclick="startWorkout(${progIdx})" style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--red);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:900;cursor:pointer;letter-spacing:.5px;box-shadow:0 4px 16px rgba(175,30,45,.35);">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
+        START
       </button>
     </div>`;
   }
@@ -1814,10 +1845,16 @@ function renderDayContent(dayArg){
     return;
   }
 
-  // Plusieurs programmes : afficher chaque carte avec son GO
-  cont.innerHTML=list.map((prog,pi)=>_progCardHtml(prog, pi, d, isSpec, true)).join("");
-  cta.style.display="none"; // Le GO est dans chaque carte
-  document.getElementById("spotifyBanner").style.display="none"; // intégré dans carte
+  // Plusieurs programmes : afficher chaque carte avec son GO (scroll vertical)
+  cont.innerHTML=`<div class="plan-scroll">${list.map((prog,pi)=>_progCardHtml(prog, pi, d, isSpec, true)).join("")}</div>`;
+  cta.style.display="none";
+  document.getElementById("spotifyBanner").style.display="none";
+}
+
+function fmtTime(secs){
+  if(!secs) return "0:00";
+  const m=Math.floor(secs/60), s=secs%60;
+  return m+":"+(s<10?"0":"")+s;
 }
 
 function fmtExVal(ex){
@@ -2000,7 +2037,9 @@ function loadStep(idx){
   if(s.type==="pause"){
     announcePause(s.time||15);
   } else if(s.name){
-    announceExercise(s.name);
+    // Cloche de transition + annonce du nom
+    playBipById("bell");
+    setTimeout(()=>speakWithDuck(s.name, 0.9, 1.05, 0), 400);
   }
 
   // Auto-start : démarre le chrono automatiquement sauf si manuel ou type reps
@@ -2521,11 +2560,30 @@ function renderEdProgSelector(){
   const wrap=document.getElementById("edProgSelector");
   if(!wrap) return;
   const list=_normalize(S.programs[edDay]);
-  if(list.length<=1){ wrap.innerHTML=""; return; }
-  wrap.innerHTML=`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-    <span style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;flex-shrink:0;">Programme :</span>
-    ${list.map((p,i)=>`<button onclick="switchEdProg(${i})" style="padding:5px 12px;border-radius:16px;border:1px solid ${i===edProgIdx?"var(--red)":"var(--border)"};background:${i===edProgIdx?"rgba(175,30,45,.15)":"var(--bg3)"};color:${i===edProgIdx?"var(--red)":"var(--text2)"};font-size:11px;font-weight:700;cursor:pointer;">${p.name||"Prog "+(i+1)}</button>`).join("")}
-  </div>`;
+  if(!list.length){ wrap.innerHTML=""; return; }
+  const multi=list.length>1;
+  // Toujours afficher le sélecteur avec le programme actif bien visible
+  wrap.innerHTML=`
+    <div style="margin-bottom:10px;">
+      <div style="font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">
+        ${multi?"Programmes de la journée":"Programme actif"}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${list.map((p,i)=>`
+          <button onclick="switchEdProg(${i})" style="
+            flex:1;min-width:100px;padding:10px 12px;
+            border-radius:10px;
+            border:2px solid ${i===edProgIdx?"var(--red)":"var(--border)"};
+            background:${i===edProgIdx?"rgba(175,30,45,.15)":"var(--bg3)"};
+            color:${i===edProgIdx?"#fff":"var(--text2)"};
+            font-size:13px;font-weight:800;cursor:pointer;
+            text-align:left;transition:all .2s;
+          ">
+            <div style="font-size:9px;letter-spacing:1px;text-transform:uppercase;opacity:.7;margin-bottom:2px;">Prog ${i+1}</div>
+            <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.name||"Sans nom"}</div>
+          </button>`).join("")}
+      </div>
+    </div>`;
 }
 
 function switchEdProg(idx){
@@ -2747,8 +2805,9 @@ function duplicateSet(si){
 
 function duplicateProg(){
   // Obtenir la liste des jours disponibles (récurrents)
-  const DAY_NAMES=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
-  const opts=DAY_NAMES.map((d,i)=>`<option value="dow:${i}">${d}</option>`).join("");
+  // DAY_F: 0=Dimanche,1=Lundi,...6=Samedi — ordre d'affichage Lun→Dim
+  const ORDER=[1,2,3,4,5,6,0];
+  const opts=ORDER.map(i=>`<option value="dow:${i}">${DAY_F[i]}</option>`).join("");
   const sel=document.createElement("select");
   sel.innerHTML=`<option value="">-- Choisir un jour cible --</option>`+opts;
   sel.style.cssText="width:100%;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;margin-top:8px;";
@@ -2955,8 +3014,13 @@ document.querySelectorAll(".overlay").forEach(o=>o.addEventListener("click",func
 renderEmojiGrid();
 renderFolderEmojiGrid();
 renderBipGrid();
-loadLocal();
+
+// Charger localStorage
+const _hadLocalData = loadLocal();
 loadAudioSettings();
+
+// Si localStorage vide → afficher l'app avec les défauts en attendant Firebase
+if(!_hadLocalData){ _applyDefaults(); }
 
 // Splash streak display
 (function(){
@@ -2965,20 +3029,22 @@ loadAudioSettings();
   else if(el) el.innerHTML=`Commence ta première séance !`;
 })();
 
-// La page splash est active par défaut (class="page active" dans HTML)
-// renderPlanning sera appelé quand Paul clique sur Démarrer
-// On pré-charge quand même pour que ce soit instantané
 renderPlanning();
 
-// Firebase : démarre le listener dès que le module ES est prêt
-// Le module peut se résoudre avant ou après ce script — on couvre les deux cas
+// Firebase : démarre le listener
 if(window._fb?.ready){
   startFbListener();
 } else {
   window.addEventListener("firebase-ready", ()=>startFbListener(), {once:true});
-  // Fallback : si l'event est déjà passé avant l'écoute (rare), on retente
   setTimeout(()=>{ if(window._fb?.ready && !_fbListenerActive) startFbListener(); }, 2000);
 }
+
+// Sécurité : si Firebase ne répond pas dans 5s ET localStorage était vide → garder les défauts
+setTimeout(()=>{
+  if(!_fbListenerActive && !_hadLocalData){
+    console.warn("Firebase non disponible, données par défaut conservées");
+  }
+}, 5000);
 </script>
 </body>
 </html>
